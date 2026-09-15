@@ -4,19 +4,41 @@ import { z } from "zod";
 
 import { db } from "@/db";
 import { products } from "@/db/schema";
+import { isAdmin } from "@/lib/auth/admin";
 
 const productSchema = z.object({
-  name: z.string().trim().min(1, "Product name is required"),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Product name is required"),
+
   description: z.string().trim().optional(),
-  price: z.coerce.number().positive("Price must be greater than 0"),
-  stock: z.coerce.number().int().min(0, "Stock cannot be negative"),
+
+  price: z.coerce
+    .number()
+    .positive("Price must be greater than 0"),
+
+  stock: z.coerce
+    .number()
+    .int()
+    .min(0, "Stock cannot be negative"),
+
   imageUrl: z.string().trim().optional(),
 });
 
 const updateProductSchema = productSchema.extend({
-  id: z.coerce.number().int().positive("Invalid product ID"),
+  id: z.coerce
+    .number()
+    .int()
+    .positive("Invalid product ID"),
 });
 
+/*
+ * Public
+ *
+ * The storefront needs access to products,
+ * so GET does not require admin authentication.
+ */
 export async function GET() {
   try {
     const data = await db
@@ -29,13 +51,33 @@ export async function GET() {
     console.error("GET products error:", error);
 
     return NextResponse.json(
-      { message: "Failed to fetch products" },
-      { status: 500 }
+      {
+        message: "Failed to fetch products",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
 
+/*
+ * Admin only
+ *
+ * Create product.
+ */
 export async function POST(request: Request) {
+  if (!(await isAdmin())) {
+    return NextResponse.json(
+      {
+        message: "Unauthorized",
+      },
+      {
+        status: 401,
+      }
+    );
+  }
+
   try {
     const body = await request.json();
 
@@ -47,7 +89,9 @@ export async function POST(request: Request) {
           message: "Invalid product data",
           errors: result.error.flatten(),
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
@@ -55,31 +99,60 @@ export async function POST(request: Request) {
       .insert(products)
       .values({
         name: result.data.name,
-        description: result.data.description || null,
+        description:
+          result.data.description || null,
         price: result.data.price.toFixed(2),
         stock: result.data.stock,
-        imageUrl: result.data.imageUrl || null,
+        imageUrl:
+          result.data.imageUrl || null,
       })
       .returning();
 
-    return NextResponse.json(product, {
-      status: 201,
-    });
+    return NextResponse.json(
+      product,
+      {
+        status: 201,
+      }
+    );
   } catch (error) {
-    console.error("POST product error:", error);
+    console.error(
+      "POST product error:",
+      error
+    );
 
     return NextResponse.json(
-      { message: "Failed to create product" },
-      { status: 500 }
+      {
+        message: "Failed to create product",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
 
+/*
+ * Admin only
+ *
+ * Update product.
+ */
 export async function PATCH(request: Request) {
+  if (!(await isAdmin())) {
+    return NextResponse.json(
+      {
+        message: "Unauthorized",
+      },
+      {
+        status: 401,
+      }
+    );
+  }
+
   try {
     const body = await request.json();
 
-    const result = updateProductSchema.safeParse(body);
+    const result =
+      updateProductSchema.safeParse(body);
 
     if (!result.success) {
       return NextResponse.json(
@@ -87,7 +160,9 @@ export async function PATCH(request: Request) {
           message: "Invalid product data",
           errors: result.error.flatten(),
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
@@ -95,18 +170,26 @@ export async function PATCH(request: Request) {
       .update(products)
       .set({
         name: result.data.name,
-        description: result.data.description || null,
+        description:
+          result.data.description || null,
         price: result.data.price.toFixed(2),
         stock: result.data.stock,
-        imageUrl: result.data.imageUrl || null,
+        imageUrl:
+          result.data.imageUrl || null,
       })
-      .where(eq(products.id, result.data.id))
+      .where(
+        eq(products.id, result.data.id)
+      )
       .returning();
 
     if (!updatedProduct) {
       return NextResponse.json(
-        { message: "Product not found" },
-        { status: 404 }
+        {
+          message: "Product not found",
+        },
+        {
+          status: 404,
+        }
       );
     }
 
@@ -115,24 +198,58 @@ export async function PATCH(request: Request) {
       product: updatedProduct,
     });
   } catch (error) {
-    console.error("PATCH product error:", error);
+    console.error(
+      "PATCH product error:",
+      error
+    );
 
     return NextResponse.json(
-      { message: "Failed to update product" },
-      { status: 500 }
+      {
+        message: "Failed to update product",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
 
+/*
+ * Admin only
+ *
+ * Delete product.
+ */
 export async function DELETE(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const id = Number(searchParams.get("id"));
+  if (!(await isAdmin())) {
+    return NextResponse.json(
+      {
+        message: "Unauthorized",
+      },
+      {
+        status: 401,
+      }
+    );
+  }
 
-    if (!Number.isInteger(id) || id <= 0) {
+  try {
+    const { searchParams } =
+      new URL(request.url);
+
+    const id = Number(
+      searchParams.get("id")
+    );
+
+    if (
+      !Number.isInteger(id) ||
+      id <= 0
+    ) {
       return NextResponse.json(
-        { message: "Invalid product ID" },
-        { status: 400 }
+        {
+          message: "Invalid product ID",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
@@ -143,8 +260,12 @@ export async function DELETE(request: Request) {
 
     if (!deletedProduct) {
       return NextResponse.json(
-        { message: "Product not found" },
-        { status: 404 }
+        {
+          message: "Product not found",
+        },
+        {
+          status: 404,
+        }
       );
     }
 
@@ -153,11 +274,18 @@ export async function DELETE(request: Request) {
       product: deletedProduct,
     });
   } catch (error) {
-    console.error("DELETE product error:", error);
+    console.error(
+      "DELETE product error:",
+      error
+    );
 
     return NextResponse.json(
-      { message: "Failed to delete product" },
-      { status: 500 }
+      {
+        message: "Failed to delete product",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
