@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { db } from "@/db";
 import { orders } from "@/db/schema";
+import { isAdmin } from "@/lib/auth/admin";
 
 const statusSchema = z.object({
   status: z.enum([
@@ -19,36 +20,36 @@ const statusSchema = z.object({
 export async function PATCH(
   request: Request,
   context: {
-    params: Promise<{ id: string }>;
+    params: Promise<{
+      id: string;
+    }>;
   }
 ) {
+  if (!(await isAdmin())) {
+    return NextResponse.json(
+      { message: "Unauthorized" },
+      { status: 401 }
+    );
+  }
+
   try {
     const { id } = await context.params;
     const orderId = Number(id);
 
     if (!Number.isInteger(orderId) || orderId <= 0) {
       return NextResponse.json(
-        {
-          message: "Invalid order ID",
-        },
-        {
-          status: 400,
-        }
+        { message: "Invalid order ID" },
+        { status: 400 }
       );
     }
 
     const body = await request.json();
-
     const result = statusSchema.safeParse(body);
 
     if (!result.success) {
       return NextResponse.json(
-        {
-          message: "Invalid order status",
-        },
-        {
-          status: 400,
-        }
+        { message: "Invalid order status" },
+        { status: 400 }
       );
     }
 
@@ -62,12 +63,8 @@ export async function PATCH(
 
     if (!updatedOrder) {
       return NextResponse.json(
-        {
-          message: "Order not found",
-        },
-        {
-          status: 404,
-        }
+        { message: "Order not found" },
+        { status: 404 }
       );
     }
 
@@ -82,12 +79,8 @@ export async function PATCH(
     );
 
     return NextResponse.json(
-      {
-        message: "Failed to update order status",
-      },
-      {
-        status: 500,
-      }
+      { message: "Failed to update order status" },
+      { status: 500 }
     );
   }
 }
