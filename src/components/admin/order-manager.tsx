@@ -14,6 +14,7 @@ type Order = {
 
 const statuses = [
   "pending",
+  "paid",
   "processing",
   "shipped",
   "completed",
@@ -63,8 +64,11 @@ export function OrderManager({ orders }: { orders: Order[] }) {
 
   function getStatusStyle(status: string) {
     switch (status) {
-      case "completed":
+      case "paid":
         return "bg-emerald-500/10 text-emerald-300";
+
+      case "completed":
+        return "bg-green-500/10 text-green-300";
 
       case "shipped":
         return "bg-blue-500/10 text-blue-300";
@@ -75,6 +79,7 @@ export function OrderManager({ orders }: { orders: Order[] }) {
       case "cancelled":
         return "bg-red-500/10 text-red-300";
 
+      case "pending":
       default:
         return "bg-amber-500/10 text-amber-300";
     }
@@ -177,13 +182,12 @@ export function OrderManager({ orders }: { orders: Order[] }) {
                       <td className="px-5 py-4">
                         <span className="text-sm font-medium">
                           ₱
-                          {Number(order.totalAmount).toLocaleString(
-                            "en-PH",
-                            {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            }
-                          )}
+                          {Number(
+                            order.totalAmount
+                          ).toLocaleString("en-PH", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
                         </span>
                       </td>
 

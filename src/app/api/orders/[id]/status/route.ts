@@ -8,6 +8,7 @@ import { orders } from "@/db/schema";
 const statusSchema = z.object({
   status: z.enum([
     "pending",
+    "paid",
     "processing",
     "shipped",
     "completed",
@@ -27,18 +28,27 @@ export async function PATCH(
 
     if (!Number.isInteger(orderId) || orderId <= 0) {
       return NextResponse.json(
-        { message: "Invalid order ID" },
-        { status: 400 }
+        {
+          message: "Invalid order ID",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
     const body = await request.json();
+
     const result = statusSchema.safeParse(body);
 
     if (!result.success) {
       return NextResponse.json(
-        { message: "Invalid order status" },
-        { status: 400 }
+        {
+          message: "Invalid order status",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
@@ -52,8 +62,12 @@ export async function PATCH(
 
     if (!updatedOrder) {
       return NextResponse.json(
-        { message: "Order not found" },
-        { status: 404 }
+        {
+          message: "Order not found",
+        },
+        {
+          status: 404,
+        }
       );
     }
 
@@ -62,11 +76,18 @@ export async function PATCH(
       order: updatedOrder,
     });
   } catch (error) {
-    console.error("Update order status error:", error);
+    console.error(
+      "Update order status error:",
+      error
+    );
 
     return NextResponse.json(
-      { message: "Failed to update order status" },
-      { status: 500 }
+      {
+        message: "Failed to update order status",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }

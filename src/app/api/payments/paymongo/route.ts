@@ -3,10 +3,15 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
-import { products } from "@/db/schema";
+import {
+  orderItems,
+  orders,
+  products,
+} from "@/db/schema";
 
 const paymentSchema = z.object({
   customerEmail: z.string().email(),
+
   items: z
     .array(
       z.object({
@@ -19,12 +24,14 @@ const paymentSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const secretKey = process.env.PAYMONGO_SECRET_KEY;
+    const secretKey =
+      process.env.PAYMONGO_SECRET_KEY;
 
     if (!secretKey) {
       return NextResponse.json(
         {
-          message: "PAYMONGO_SECRET_KEY is not configured",
+          message:
+            "PAYMONGO_SECRET_KEY is not configured",
         },
         {
           status: 500,
@@ -50,15 +57,19 @@ export async function POST(request: Request) {
 
     const { customerEmail, items } = result.data;
 
-    /*
-     * IMPORTANT:
-     * Never trust prices sent by the browser.
-     *
-     * We retrieve every product directly from PostgreSQL
-     * and use the database price.
-     */
+    const resolvedItems: {
+      product: typeof products.$inferSelect;
+      quantity: number;
+    }[] = [];
+
     const lineItems = [];
 
+    let totalAmount = 0;
+
+    /*
+     * Always retrieve product prices from the DB.
+     * Never trust prices from the browser.
+     */
     for (const item of items) {
       const [product] = await db
         .select()
@@ -88,41 +99,65 @@ export async function POST(request: Request) {
         );
       }
 
-      /*
-       * PayMongo expects amounts in centavos.
-       *
-       * ₱1,499.00
-       * becomes
-       * 149900
-       */
-      const amount = Math.round(
-        Number(product.price) * 100
-      );
+      const price = Number(product.price);
+
+      totalAmount += price * item.quantity;
+
+      resolvedItems.push({
+        product,
+        quantity: item.quantity,
+      });
 
       lineItems.push({
         name: product.name,
+
         description:
           product.description || product.name,
-        amount,
+
+        amount: Math.round(price * 100),
+
         currency: "PHP",
+
         quantity: item.quantity,
       });
     }
 
     /*
-     * PayMongo requires fully qualified redirect URLs.
+     * Create a PENDING Mercato order.
      *
-     * request.nextUrl.origin automatically gives us:
-     *
-     * development:
-     * http://localhost:3000
-     *
-     * production:
-     * https://your-domain.com
+     * Important:
+     * We are NOT reducing stock here.
      */
-    const origin = new URL(request.url).origin;
+    const order = await db.transaction(
+      async (tx) => {
+        const [createdOrder] = await tx
+          .insert(orders)
+          .values({
+            customerEmail,
+            status: "pending",
+            totalAmount: totalAmount.toFixed(2),
+          })
+          .returning();
 
-    const referenceNumber = `MERCATO-${Date.now()}`;
+        for (const item of resolvedItems) {
+          await tx.insert(orderItems).values({
+            orderId: createdOrder.id,
+            productId: item.product.id,
+            quantity: item.quantity,
+            price: item.product.price,
+          });
+        }
+
+        return createdOrder;
+      }
+    );
+
+    /*
+     * This connects PayMongo to our internal order.
+     */
+    const referenceNumber = `MERCATO-${order.id}`;
+
+    const origin = new URL(request.url).origin;
 
     const authorization = Buffer.from(
       `${secretKey}:`
@@ -149,7 +184,8 @@ export async function POST(request: Request) {
                 "qrph",
               ],
 
-              success_url: `${origin}/checkout/payment-success`,
+              success_url: `${origin}/checkout/payment-success?order=${order.id}`,
+
               cancel_url: `${origin}/checkout`,
 
               reference_number: referenceNumber,
@@ -157,6 +193,7 @@ export async function POST(request: Request) {
               send_email_receipt: true,
 
               metadata: {
+                order_id: String(order.id),
                 customer_email: customerEmail,
               },
             },
@@ -165,13 +202,27 @@ export async function POST(request: Request) {
       }
     );
 
-    const paymongoData = await paymongoResponse.json();
+    const paymongoData =
+      await paymongoResponse.json();
 
     if (!paymongoResponse.ok) {
       console.error(
         "PayMongo checkout error:",
         paymongoData
       );
+
+      /*
+       * Checkout session creation failed.
+       *
+       * Remove the pending order because
+       * payment never actually started.
+       *
+       * order_items are removed automatically
+       * because order_id uses ON DELETE CASCADE.
+       */
+      await db
+        .delete(orders)
+        .where(eq(orders.id, order.id));
 
       return NextResponse.json(
         {
@@ -189,6 +240,10 @@ export async function POST(request: Request) {
       paymongoData.data?.attributes?.checkout_url;
 
     if (!checkoutUrl) {
+      await db
+        .delete(orders)
+        .where(eq(orders.id, order.id));
+
       return NextResponse.json(
         {
           message:
@@ -202,8 +257,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       checkoutUrl,
+
+      orderId: order.id,
+
       referenceNumber,
-      checkoutSessionId: paymongoData.data.id,
+
+      checkoutSessionId:
+        paymongoData.data.id,
     });
   } catch (error) {
     console.error(
